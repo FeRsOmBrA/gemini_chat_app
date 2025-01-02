@@ -33,71 +33,6 @@ from streamlit_chat_widget import chat_input_widget
 # Floating container for placing the chat widget at the bottom
 from streamlit_float import float_init
 
-import os
-
-# Ruta base en el entorno de Streamlit
-base_path = "/home/adminuser/venv/lib/python3.12/site-packages/streamlit_chat_widget/frontend/build/static/css"
-
-# CSS personalizado
-custom_css = """
-body {
-  background-color: initial !important;
-  border: none !important;
-  margin: 0;
-  overflow: hidden;
-  padding: 0;
-}
-
-/* Resto del CSS proporcionado */
-.chat-container {
-  align-items: center;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  background: #ffffff1a;
-  border: none;
-  border-radius: 30px;
-  bottom: 10px;
-  box-shadow: 2px 3px 5px #0003;
-  display: flex;
-  height: 60px;
-  justify-content: space-between;
-  left: 50%;
-  max-width: 600px;
-  padding: 10px;
-  position: fixed;
-  transform: translateX(-50%);
-  width: 90%;
-  z-index: 1000;
-}
-
-/* Continua el CSS hasta el final */
-"""
-
-# Función para sobrescribir los archivos CSS
-
-
-def overwrite_css_files(path, css_content):
-    if not os.path.exists(path):
-        print(f"La ruta {path} no existe. Verifica que sea correcta.")
-        pass
-
-    # Itera sobre todos los archivos en la carpeta
-    for root, dirs, files in os.walk(path):
-        for file in files:
-            if file.endswith(".css"):  # Solo archivos CSS
-                file_path = os.path.join(root, file)
-                try:
-                    # Sobrescribe el archivo con el CSS personalizado
-                    with open(file_path, "w", encoding="utf-8") as css_file:
-                        css_file.write(css_content)
-                    print(f"Archivo sobrescrito: {file_path}")
-                except Exception as e:
-                    print(f"Error al sobrescribir {file_path}: {e}")
-
-
-# Ejecuta la función
-overwrite_css_files(base_path, custom_css)
-
 
 def initialize_firebase():
     global openai_client
@@ -544,7 +479,8 @@ def generate_text_response(user_message: str) -> str:
     return full_text.strip(), image_to_display
 
 
-voice_client = voice_genai.Client(http_options={'api_version': 'v1alpha'}, api_key = st.secrets["google"]["GOOGLE_API_KEY"])
+voice_client = voice_genai.Client(http_options={
+                                  'api_version': 'v1alpha'}, api_key=st.secrets["google"]["GOOGLE_API_KEY"])
 VOICE_MODEL = "gemini-2.0-flash-exp"
 
 
