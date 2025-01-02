@@ -4,3 +4,6 @@ PyMuPDF
 clipboard
 google-generativeai
 Pillow
+openai
+streamlit_extras
+streamlit-chat-widget
