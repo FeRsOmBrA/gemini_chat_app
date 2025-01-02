@@ -17,7 +17,8 @@ from streamlit.runtime.secrets import AttrDict
 # -------------------------------
 
 
-def initialize_firebase():
+def initialize():
+    genai.configure(api_key=st.secrets['google']['GOOGLE_API_KEY'])
     if not firebase_admin._apps:
         firebase_credentials: AttrDict
         firebase_credentials = st.secrets['firebase']['my_project_settings']
@@ -28,9 +29,10 @@ def initialize_firebase():
         firebase_admin.initialize_app(cred, {
             'databaseURL': 'https://gemini-app-dbbdb-default-rtdb.firebaseio.com/'
         })
+        
 
 
-initialize_firebase()
+initialize()
 
 # Database references
 chats_ref = db.reference('chats')
