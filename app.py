@@ -10,6 +10,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from io import BytesIO
 from PIL import Image
 import base64
+from st_multimodal_chatinput import multimodal_chatinput
 
 from streamlit.runtime.secrets import AttrDict
 # -------------------------------
@@ -17,7 +18,7 @@ from streamlit.runtime.secrets import AttrDict
 # -------------------------------
 
 
-def initialize_firebase():
+def initialize():
     if not firebase_admin._apps:
         firebase_credentials: AttrDict
         firebase_credentials = st.secrets['firebase']['my_project_settings']
@@ -28,9 +29,10 @@ def initialize_firebase():
         firebase_admin.initialize_app(cred, {
             'databaseURL': 'https://gemini-app-dbbdb-default-rtdb.firebaseio.com/'
         })
+        genai.configure(api_key=st.secrets['google']["GOOGLE_API_KEY"])
 
 
-initialize_firebase()
+initialize()
 
 # Database references
 chats_ref = db.reference('chats')
