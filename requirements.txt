@@ -1,6 +1,6 @@
 streamlit
 firebase-admin
-google-generativeai
-pymupdf
+PyMuPDF
 clipboard
-pillow
+google-generativeai
+Pillow
