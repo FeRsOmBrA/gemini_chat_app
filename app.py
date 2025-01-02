@@ -10,7 +10,6 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from io import BytesIO
 from PIL import Image
 import base64
-from st_multimodal_chatinput import multimodal_chatinput
 
 from streamlit.runtime.secrets import AttrDict
 # -------------------------------
