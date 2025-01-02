@@ -7,3 +7,5 @@ Pillow
 openai
 streamlit_extras
 streamlit-chat-widget
+streamlit-float
+google-genai
