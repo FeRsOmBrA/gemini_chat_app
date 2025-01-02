@@ -1,43 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Complete Streamlit app with the requested improvements:
-
-1) **Two Conversation Modes** (select via sidebar):
-   - "Text + Images Only" (no voice).
-   - "Voice Mode" (Gemini 2.0 + Whisper for transcription + voice output).
-2) **Fixed 'Part object is not subscriptable' Error** by referencing `part.text`,
-   `part.executable_code`, etc. directly instead of `part["text"]`.
-3) **Chat Input Widget** is placed at the bottom of the screen, with chat messages
-   above it. We use `streamlit_float` and some CSS to ensure correct positioning.
-4) **No Deprecated OpenAI usage**: Instead we demonstrate the snippet with
-   `from openai import OpenAI` and `client.audio.transcriptions.create` to do Whisper.
-   (If you prefer the `openai` standard library usage, adapt accordingly.)
-
-Additional notes:
-- Make sure you have installed:
-    pip install --upgrade streamlit-chat-widget
-    pip install streamlit-float
-    pip install google-generativeai
-    pip install google-genai
-    pip install PyMuPDF
-    pip install Pillow
-    pip install openai
-    
-- Ensure your `st.secrets` includes:
-    st.secrets["openai"]["OPENAI_API_KEY"]
-    st.secrets["google"]["GOOGLE_API_KEY"]
-    st.secrets["firebase"]["my_project_settings"]
-      (and other relevant keys)
-
-- This example stores text & audio from the assistant in Firebase 
-  alongside user messages. Chat messages are replayed from `st.session_state`
-  at the top of the page.
-
-- If you need additional styling adjustments, you can expand the CSS 
-  in the `st.markdown(...)` block below.
-
-"""
-
 import streamlit as st
 import streamlit.components.v1 as components
 import datetime
@@ -54,16 +14,14 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import google.genai as voice_genai
 from google.genai import types as voice_types
 
-# We'll demonstrate the 'from openai import OpenAI' approach (no deprecated usage).
+
 from openai import OpenAI
 
 import base64
 import wave
 import asyncio
 import contextlib
-import logging
-import os
-import json
+
 
 from io import BytesIO
 from PIL import Image
@@ -74,6 +32,71 @@ from streamlit_chat_widget import chat_input_widget
 
 # Floating container for placing the chat widget at the bottom
 from streamlit_float import float_init
+
+import os
+
+# Ruta base en el entorno de Streamlit
+base_path = "/home/adminuser/venv/lib/python3.12/site-packages/streamlit_chat_widget/frontend/build/static/css"
+
+# CSS personalizado
+custom_css = """
+body {
+  background-color: initial !important;
+  border: none !important;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Resto del CSS proporcionado */
+.chat-container {
+  align-items: center;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  background: #ffffff1a;
+  border: none;
+  border-radius: 30px;
+  bottom: 10px;
+  box-shadow: 2px 3px 5px #0003;
+  display: flex;
+  height: 60px;
+  justify-content: space-between;
+  left: 50%;
+  max-width: 600px;
+  padding: 10px;
+  position: fixed;
+  transform: translateX(-50%);
+  width: 90%;
+  z-index: 1000;
+}
+
+/* Continua el CSS hasta el final */
+"""
+
+# Función para sobrescribir los archivos CSS
+
+
+def overwrite_css_files(path, css_content):
+    if not os.path.exists(path):
+        print(f"La ruta {path} no existe. Verifica que sea correcta.")
+        pass
+
+    # Itera sobre todos los archivos en la carpeta
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            if file.endswith(".css"):  # Solo archivos CSS
+                file_path = os.path.join(root, file)
+                try:
+                    # Sobrescribe el archivo con el CSS personalizado
+                    with open(file_path, "w", encoding="utf-8") as css_file:
+                        css_file.write(css_content)
+                    print(f"Archivo sobrescrito: {file_path}")
+                except Exception as e:
+                    print(f"Error al sobrescribir {file_path}: {e}")
+
+
+# Ejecuta la función
+overwrite_css_files(base_path, custom_css)
 
 
 def initialize_firebase():
@@ -298,6 +321,20 @@ if models:
         selected_model = models[0]
 else:
     selected_model = "gemini-1.5-pro-latest"
+# Instead of storing the whole speech_config dict, just store the voice name:
+if conversation_mode == "Voice Conversation with Gemini":
+    available_voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
+    selected_voice = st.sidebar.selectbox("Select voice", available_voices)
+    st.session_state["generation_config"]["voice_name"] = selected_voice
+else:
+    st.session_state["generation_config"].pop("voice_name", None)
+
+# When saving config, it will now include speech_config in “generation_config”
+if st.sidebar.button("Save Configuration"):
+    save_parameters_to_firebase(st.session_state["generation_config"])
+    save_system_instruction_to_firebase(st.session_state["system_instruction"])
+    st.sidebar.success("Configuration saved to Firebase.")
+
 
 st.sidebar.subheader("Generation Parameters")
 st.session_state["generation_config"]["temperature"] = st.sidebar.slider(
@@ -336,11 +373,6 @@ st.session_state["system_instruction"] = st.sidebar.text_area(
 
 st.session_state['image_uploaded'] = None
 
-
-if st.sidebar.button("Save Configuration"):
-    save_parameters_to_firebase(st.session_state["generation_config"])
-    save_system_instruction_to_firebase(st.session_state["system_instruction"])
-    st.sidebar.success("Configuration saved to Firebase.")
 
 system_instruction_default = """
 You are a multilingual AI assistant capable of adapting to various tasks as requested by the user. 
@@ -532,10 +564,51 @@ async def async_enumerate(aiter):
         i += 1
 
 
+# In do_voice_generation, build typed objects:
 async def do_voice_generation(user_prompt: str) -> bytes:
-    config = {"generation_config": {"response_modalities": ["AUDIO"]}}
+    # Build the typed objects
+    # VoiceConfig is typically PrebuiltVoiceConfig(voice_name="Puck") etc.
+    voice_cfg = None
+    if st.session_state["generation_config"].get("voice_name"):
+        voice_cfg = voice_types.VoiceConfig(
+            prebuilt_voice_config=voice_types.PrebuiltVoiceConfig(
+                voice_name=st.session_state["generation_config"]["voice_name"]
+            )
+        )
+
+    # For system_instruction, pass an object or dict. Example uses “parts”:
+    # If your system_instruction is just a string, embed it as “{"parts": [{"text": "..."}]}”.
+    system_instr = {
+        "parts": [{"text": st.session_state["system_instruction"]}]
+    }
+
+    config = voice_types.LiveConnectConfig(
+        generation_config=voice_types.GenerationConfig(
+            temperature=st.session_state["generation_config"].get(
+                "temperature", 1.0),
+            top_p=st.session_state["generation_config"].get("top_p", 0.95),
+            max_output_tokens=st.session_state["generation_config"].get(
+                "max_output_tokens", 8192),
+        ),
+        speech_config=voice_types.SpeechConfig(
+            voice_config=voice_cfg
+        )
+        if voice_cfg
+        else None,
+        response_modalities=["AUDIO"],
+        system_instruction=system_instr,
+        tools=voice_types.Tool(
+            code_execution=voice_types.ToolCodeExecution(
+
+            )
+        )
+
+
+    )
+
     file_name = "gemini_voice_output.wav"
     async with voice_client.aio.live.connect(model=VOICE_MODEL, config=config) as session:
+
         await session.send(user_prompt, end_of_turn=True)
         turn = session.receive()
         with wave_file(file_name) as wav:
@@ -565,7 +638,6 @@ def transcribe_with_whisper(audio_bytes: bytes) -> str:
             return ""
 
 
-
 float_init()
 widget_container = st.container()
 with widget_container:
@@ -579,6 +651,7 @@ widget_container.float(
 
 st.markdown("""
 <style>
+
 .stCustomComponentV1{
     max-height: 200px;
 }
@@ -617,7 +690,7 @@ if user_input and user_input != st.session_state["last_user_input"]:
                     st.image(st.session_state["image_uploaded"])
 
             assistant_text, image = generate_text_response(user_text_prompt)
-            
+
             if assistant_text and image is None:
                 st.session_state["current_chat"].append({
                     "role": "assistant",
@@ -643,7 +716,8 @@ if user_input and user_input != st.session_state["last_user_input"]:
 
     elif user_text_prompt and conversation_mode == "Voice Conversation with Gemini":
         try:
-            
+            parts_to_store = []  # <--- Add this line
+
             assistant_audio_bytes = generate_voice_response(
                 user_text_prompt) if user_text_prompt else None
             audio_b64 = base64.b64encode(
@@ -671,7 +745,7 @@ uploaded_image = st.sidebar.file_uploader(
     key="uploaded_image"
 )
 if uploaded_image and not st.session_state.get("image_processed", False):
-    
+
     image = Image.open(uploaded_image)
     st.session_state['image_uploaded'] = image
     st.sidebar.image(image, use_container_width=True)
