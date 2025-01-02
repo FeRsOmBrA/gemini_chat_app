@@ -533,11 +533,6 @@ async def do_voice_generation(user_prompt: str) -> bytes:
         else None,
         response_modalities=["AUDIO"],
         system_instruction=system_instr,
-        tools=voice_types.Tool(
-            code_execution=voice_types.ToolCodeExecution(
-
-            )
-        )
 
 
     )
