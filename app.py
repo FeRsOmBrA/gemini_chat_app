@@ -512,7 +512,7 @@ def generate_text_response(user_message: str) -> str:
     return full_text.strip(), image_to_display
 
 
-voice_client = voice_genai.Client(http_options={'api_version': 'v1alpha'})
+voice_client = voice_genai.Client(http_options={'api_version': 'v1alpha'}, api_key = st.secrets["google"]["GOOGLE_API_KEY"])
 VOICE_MODEL = "gemini-2.0-flash-exp"
 
 
