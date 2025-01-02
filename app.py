@@ -27,7 +27,7 @@ def initialize():
         cred = credentials.Certificate(firebase_credentials.to_dict())
 
         firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://gemini-app-dbbdb-default-rtdb.firebaseio.com/'
+            'databaseURL':  st.secrets['firebase']['dburl']
         })
         genai.configure(api_key=st.secrets['google']["GOOGLE_API_KEY"])
 
