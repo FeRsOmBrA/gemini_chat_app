@@ -844,56 +844,58 @@ recoreder_audio = st.sidebar.audio_input("Record audio")
 # accept the audio
 
 if recoreder_audio is not None:
-    
-    
+    st.session_state["audio_uploaded"] = recoreder_audio
     if st.sidebar.button("Send audio"):
         if conversation_mode == "Text + Media":
-         with st.chat_message("user"):
-             st.audio(recoreder_audio)
-         assistant_text, image = generate_text_response_with_audio_input(
-             recoreder_audio)
-         if assistant_text and image is None:
-             st.session_state["current_chat"].append({
-                 "role": "assistant",
-                 "parts": [
-                     {"text": assistant_text},
-                 ]
-             })
-         elif assistant_text and image is not None:
-             # If there's also an image to return
-             buffer = BytesIO()
-             image.save(buffer, format="JPEG")
-             image_data = buffer.getvalue()
-             image_b64 = base64.b64encode(image_data).decode("utf-8")
- 
-             st.session_state["current_chat"].append({
-                 "role": "assistant",
-                 "parts": [
-                     {"text": assistant_text},
-                     {"mime_type": "image/jpeg", "data": image_b64},
-                 ]
-             })
-         st.rerun()
+            with st.chat_message("user"):
+                st.audio(st.session_state["audio_uploaded"])
+            assistant_text, image = generate_text_response_with_audio_input(
+                st.session_state["audio_uploaded"])
+            if assistant_text and image is None:
+                st.session_state["current_chat"].append({
+                    "role": "assistant",
+                    "parts": [
+                        {"text": assistant_text},
+                    ]
+                })
+            elif assistant_text and image is not None:
+                # If there's also an image to return
+                buffer = BytesIO()
+                image.save(buffer, format="JPEG")
+                image_data = buffer.getvalue()
+                image_b64 = base64.b64encode(image_data).decode("utf-8")
+
+                st.session_state["current_chat"].append({
+                    "role": "assistant",
+                    "parts": [
+                        {"text": assistant_text},
+                        {"mime_type": "image/jpeg", "data": image_b64},
+                    ]
+                })
+           
+            st.rerun()
+
         elif conversation_mode == "Voice Conversation with Gemini":
             try:
                 st.session_state["current_chat"].append({
                     "role": "user",
                     "parts": [{"mime_type": "audio/wav", "data": base64.b64encode(
-                        recoreder_audio.read()).decode("utf-8")}]
+                        st.session_state["audio_uploaded"].read()).decode("utf-8")}]
                 })
                 with st.chat_message("user"):
-                    st.audio(recoreder_audio)
+                    st.audio(st.session_state["audio_uploaded"])
                 parts_to_store = []
-                audio_text = transcribe_with_whisper(recoreder_audio.read())
+                audio_text = transcribe_with_whisper(
+                    st.session_state["audio_uploaded"].read())
                 assistant_audio_bytes = generate_voice_response(
                     audio_text) if audio_text else None
                 audio_b64 = base64.b64encode(
                     assistant_audio_bytes).decode() if assistant_audio_bytes else None
-                
+
                 if audio_b64:
                     parts_to_store.append(
                         {"mime_type": "audio/wav", "data": audio_b64})
-                
+
                 st.session_state["current_chat"].append({
                     "role": "assistant",
                     "parts": parts_to_store
@@ -903,8 +905,8 @@ if recoreder_audio is not None:
                     "role": "assistant",
                     "parts": [{"text": f"Error generating assistant response: {e}"}]
                 })
+           
             st.rerun()
-            
 
 
 if uploaded_media and not st.session_state.get("file_processed", False):
@@ -1025,11 +1027,10 @@ if user_input and user_input != st.session_state["last_user_input"]:
 
     elif user_text_prompt and conversation_mode == "Voice Conversation with Gemini":
         try:
-            
+
             with st.chat_message("user"):
                 st.markdown(user_text_prompt)
-                
-            
+
             parts_to_store = []
             # Voice generation with memory
             assistant_audio_bytes = generate_voice_response(
