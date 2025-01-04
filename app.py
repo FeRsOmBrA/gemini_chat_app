@@ -451,6 +451,9 @@ st.session_state["system_instruction"] = st.sidebar.text_area(
 
 st.session_state['image_uploaded'] = None
 
+st.session_state["video_uploaded"] = None
+st.session_state["audio_uploaded"] = None
+
 system_instruction_default = """
 You are a multilingual AI assistant capable of adapting to various tasks as requested by the user. 
 Respond in the same language as the user's prompt. Ensure your answers are formatted in Markdown, 
@@ -543,7 +546,13 @@ if selected_chat != "Select":
 else:
     st.header("Chat Session")
 
+
+
+
+
 for idx, message in enumerate(st.session_state["current_chat"]):
+    
+
     role = message.get("role", "user")
     with st.chat_message(role):
         parts = message.get("parts", [])
@@ -871,6 +880,7 @@ uploaded_media = st.sidebar.file_uploader(
 )
 
 if uploaded_media and not st.session_state.get("image_processed", False):
+
     if conversation_mode == "Text + Media":
         try:
             file_type = uploaded_media.type
@@ -904,6 +914,7 @@ if uploaded_media and not st.session_state.get("image_processed", False):
                         {"mime_type": file_type, "data": video_b64}
                     ]
                 })
+                st.session_state["video_uploaded"] = uploaded_media
 
                 st.sidebar.info(f"Video uploaded as {file_type}")
 
@@ -918,6 +929,7 @@ if uploaded_media and not st.session_state.get("image_processed", False):
                         {"mime_type": file_type, "data": audio_b64}
                     ]
                 })
+                st.session_state["audio_uploaded"] = uploaded_media
 
         except Exception as e:
             st.sidebar.error(f"Could not encode media: {e}")
