@@ -4,8 +4,10 @@ import datetime
 import fitz  # PyMuPDF
 import clipboard
 import firebase_admin
-from firebase_admin import credentials, db
+from firebase_admin import credentials, db, auth
 
+
+import requests
 # google.generativeai for text-based model calls
 import google.generativeai as text_genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -14,14 +16,12 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import google.genai as voice_genai
 from google.genai import types as voice_types
 
-
 from openai import OpenAI
 
 import base64
 import wave
 import asyncio
 import contextlib
-
 
 from io import BytesIO
 from PIL import Image
@@ -33,14 +33,103 @@ from streamlit_chat_widget import chat_input_widget
 # Floating container for placing the chat widget at the bottom
 from streamlit_float import float_init
 
+# 1) Implement memory in voice mode
+def build_voice_conversation_context(last_n=3) -> str:
+    """
+    Builds a simple text-based conversation string from the last n user 
+    and assistant messages to provide context in voice mode.
+    """
+    messages = st.session_state["current_chat"][-last_n * 2:]
+    context_str = ""
+    for msg in messages:
+        role = msg.get("role")
+        parts = msg.get("parts", [])
+        text_content = []
+        for part in parts:
+            if "text" in part:
+                text_content.append(part["text"])
+        if text_content:
+            if role == "user":
+                context_str += "User: " + " ".join(text_content) + "\n"
+            elif role == "assistant":
+                context_str += "Assistant: " + " ".join(text_content) + "\n"
+    return context_str
 
-def initialize_firebase():
+
+# 3) Add login for saving the information separately by user
+#    and implement a guest login which turns off saving features
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "user_id" not in st.session_state:
+    st.session_state["user_id"] = None
+
+
+def login(email, password):
+    """
+    Login an existing user with email/password, or register if not found.
+    """
+    user: auth.UserRecord = None
+    try:
+        # Attempt to sign in using Firebase's REST API
+        payload = {
+            "email": email,
+            "password": password,
+            "returnSecureToken": True
+        }
+        api_key = st.secrets["firebase"]["WEB_API_KEY"]
+        resp = requests.post(
+            f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={
+                api_key}",
+            data=payload
+        )
+        data = resp.json()
+        if "idToken" in data:
+            user = auth.get_user_by_email(email)
+        else:
+            raise Exception("Email or password is incorrect.")
+    except Exception as e:
+        st.sidebar.error(str(e))
+
+    if user:
+        st.session_state["logged_in"] = True
+        st.session_state["user_id"] = user.uid
+        st.session_state["display_name"] = user.display_name
+        st.rerun()
+
+
+def register(email, password, display_name=None):
+    try:
+        user = auth.create_user(
+            email=email, password=password, display_name=display_name)
+        st.sidebar.success("Registration successful. Please login.")
+        return user
+
+    except auth.EmailAlreadyExistsError:
+        st.sidebar.error("Email already registered.")
+        return None
+    except Exception as e:
+        st.sidebar.error(f"Registration failed: {e}")
+        return None
+
+
+def logout():
+    st.session_state["logged_in"] = False
+    st.session_state["user_id"] = None
+    st.session_state["display_name"] = None
+    st.rerun()
+###################################################################
+# --------------- END NEW/UPDATED CODE BLOCK ABOVE --------------- #
+###################################################################
+
+
+def inializate():
     global openai_client
     if not firebase_admin._apps:
         firebase_credentials: AttrDict
         firebase_credentials = st.secrets['firebase']['my_project_settings']
 
         cred = credentials.Certificate(firebase_credentials.to_dict())
+
         firebase_admin.initialize_app(cred, {
             'databaseURL': st.secrets['firebase']['dburl']
         })
@@ -52,24 +141,40 @@ def initialize_firebase():
     openai_client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
 
 
-initialize_firebase()
-
-# Firebase references
-chats_ref = db.reference('chats')
-parameters_ref = db.reference('parameters')
-system_ref = db.reference('system_instruction')
+inializate()
 
 
+# ------------------ UPDATED TO SAVE/LOAD PER USER ---------------- #
 def save_chat_to_firebase(chat_name, messages, timestamp):
-    if chat_name:
-        chats_ref.child(chat_name).set({
+    """
+    Saves the chat under the logged-in user's reference, 
+    or does nothing if user is a guest or not logged in.
+    """
+    if chat_name and st.session_state["logged_in"] and st.session_state["user_id"] != "guest":
+        user_id = st.session_state["user_id"]
+        user_chats_ref = db.reference(f'users/{user_id}/chats')
+        user_chats_ref.child(chat_name).set({
             'timestamp': timestamp,
             'messages': messages
         })
 
 
 def load_chats_from_firebase():
-    return chats_ref.get() or {}
+    """
+    Returns the chats of the logged-in user, or empty dict if not logged in or if guest.
+    """
+    if st.session_state["logged_in"] and st.session_state["user_id"] != "guest":
+        user_id = st.session_state["user_id"]
+        user_chats_ref = db.reference(f'users/{user_id}/chats')
+        return user_chats_ref.get() or {}
+    else:
+        return {}
+
+# ----------------------------------------------------------------- #
+
+
+parameters_ref = db.reference('parameters')
+system_ref = db.reference('system_instruction')
 
 
 def save_parameters_to_firebase(parameters):
@@ -203,13 +308,14 @@ default_generation_config = {
     "response_mime_type": "text/plain",
 }
 
+
+# ------------------ LOAD STATE AFTER USER LOGIN ------------------ #
 if "saved_chats" not in st.session_state:
-    st.session_state["saved_chats"] = load_chats_from_firebase()
+    st.session_state["saved_chats"] = {}
 
 if "generation_config" not in st.session_state:
     st.session_state["generation_config"] = load_parameters_from_firebase(
-        default_generation_config
-    )
+        default_generation_config)
 
 if "system_instruction" not in st.session_state:
     st.session_state["system_instruction"] = load_system_instruction_from_firebase()
@@ -224,12 +330,49 @@ if "image_processed" not in st.session_state:
 # To avoid infinite reruns, track the last input
 if "last_user_input" not in st.session_state:
     st.session_state["last_user_input"] = None
+# --------------------------------------------------------------- #
+
+
+###################################################################
+# 4) Add possibility of adding video or audio as input in the same
+#    component that handles images (for text/image mode).
+###################################################################
+
+
+st.sidebar.header("Login / User Session")
+if not st.session_state["logged_in"]:
+    login_mode = st.sidebar.radio(
+        "Select Mode", ["Login", "Register", "Guest"])
+
+    if login_mode == "Login":
+        email = st.sidebar.text_input("Email")
+        password = st.sidebar.text_input("Password", type="password")
+        if st.sidebar.button("Login"):
+            login(email, password)
+
+    elif login_mode == "Register":
+        name = st.sidebar.text_input("Name")
+        email = st.sidebar.text_input("Email")
+        password = st.sidebar.text_input("Password", type="password")
+        if st.sidebar.button("Register"):
+            register(email, password, name)
+
+    elif login_mode == "Guest":
+        if st.sidebar.button("Continue as Guest"):
+            st.session_state["logged_in"] = True
+            st.session_state["user_id"] = "guest"
+            st.session_state["display_name"] = "Guest"
+            st.rerun()
+else:
+    st.sidebar.success(f"Logged in as {st.session_state['display_name']}")
+    if st.sidebar.button("Logout"):
+        logout()
 
 st.sidebar.header("Configuration")
 
 conversation_mode = st.sidebar.radio(
     "Select conversation mode:",
-    ["Text + Images Only", "Voice Conversation with Gemini"]
+    ["Text + Media", "Voice Conversation with Gemini"]
 )
 
 models = []
@@ -256,7 +399,7 @@ if models:
         selected_model = models[0]
 else:
     selected_model = "gemini-1.5-pro-latest"
-# Instead of storing the whole speech_config dict, just store the voice name:
+
 if conversation_mode == "Voice Conversation with Gemini":
     available_voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
     selected_voice = st.sidebar.selectbox("Select voice", available_voices)
@@ -264,7 +407,7 @@ if conversation_mode == "Voice Conversation with Gemini":
 else:
     st.session_state["generation_config"].pop("voice_name", None)
 
-# When saving config, it will now include speech_config in “generation_config”
+
 if st.sidebar.button("Save Configuration"):
     save_parameters_to_firebase(st.session_state["generation_config"])
     save_system_instruction_to_firebase(st.session_state["system_instruction"])
@@ -308,7 +451,6 @@ st.session_state["system_instruction"] = st.sidebar.text_area(
 
 st.session_state['image_uploaded'] = None
 
-
 system_instruction_default = """
 You are a multilingual AI assistant capable of adapting to various tasks as requested by the user. 
 Respond in the same language as the user's prompt. Ensure your answers are formatted in Markdown, 
@@ -332,9 +474,17 @@ try:
 except Exception as e:
     st.sidebar.error(f"Error initializing text model: {e}")
 
+
 st.sidebar.header("Chat Management")
+
+# --------------- LOAD CHATS AFTER LOGIN --------------
+if st.session_state["logged_in"]:
+    st.session_state["saved_chats"] = load_chats_from_firebase()
+# -----------------------------------------------------
+
 chat_name = st.sidebar.text_input(
-    "Chat Name", placeholder="Enter a name to save this chat")
+    "Chat Name", placeholder="Enter a name to save this chat"
+)
 
 if st.sidebar.button("Save Current Chat"):
     if chat_name:
@@ -353,7 +503,8 @@ if st.sidebar.button("Clear Current Chat"):
     st.session_state["current_chat"] = []
     st.rerun()
 
-saved_chat_names = list(st.session_state["saved_chats"].keys())
+saved_chat_names = list(st.session_state["saved_chats"].keys(
+)) if st.session_state["logged_in"] else []
 selected_chat = st.sidebar.selectbox(
     "Load a Saved Chat",
     ["Select"] + saved_chat_names
@@ -385,6 +536,7 @@ if uploaded_pdf is not None:
                           on_click=copy_manual, args=(text,))
         if text == clipboard.paste():
             st.sidebar.success("Text copied to clipboard!")
+
 
 if selected_chat != "Select":
     st.header(selected_chat)
@@ -446,9 +598,16 @@ for idx, message in enumerate(st.session_state["current_chat"]):
                         st.audio(audio_bytes)
                     except:
                         pass
+                elif mime_type.startswith("video/"):
+                    try:
+                        video_bytes = base64.b64decode(data_value) if isinstance(
+                            data_value, str) else data_value
+                        st.video(video_bytes)
+                    except:
+                        pass
 
 
-def generate_text_response(user_message: str) -> str:
+def generate_text_response(user_message: str):
     chat = text_model.start_chat(history=st.session_state["current_chat"])
     response = chat.send_message(
         user_message,
@@ -473,9 +632,9 @@ def generate_text_response(user_message: str) -> str:
         if p.inline_data:
             try:
                 image_to_display = Image.open(BytesIO(p.inline_data.data))
-
             except:
                 pass
+
     return full_text.strip(), image_to_display
 
 
@@ -500,10 +659,15 @@ async def async_enumerate(aiter):
         i += 1
 
 
-# In do_voice_generation, build typed objects:
 async def do_voice_generation(user_prompt: str) -> bytes:
-    # Build the typed objects
-    # VoiceConfig is typically PrebuiltVoiceConfig(voice_name="Puck") etc.
+    """
+    Sends the final_prompt (including conversation context for memory in voice mode)
+    to the Gemini voice model, and writes the streaming audio to a WAV file.
+    """
+    # 1) Implement memory in voice mode by building conversation context:
+    conversation_context = build_voice_conversation_context(3)
+    final_prompt = conversation_context + "\nUser: " + user_prompt
+
     voice_cfg = None
     if st.session_state["generation_config"].get("voice_name"):
         voice_cfg = voice_types.VoiceConfig(
@@ -512,8 +676,6 @@ async def do_voice_generation(user_prompt: str) -> bytes:
             )
         )
 
-    # For system_instruction, pass an object or dict. Example uses “parts”:
-    # If your system_instruction is just a string, embed it as “{"parts": [{"text": "..."}]}”.
     system_instr = {
         "parts": [{"text": st.session_state["system_instruction"]}]
     }
@@ -528,24 +690,20 @@ async def do_voice_generation(user_prompt: str) -> bytes:
         ),
         speech_config=voice_types.SpeechConfig(
             voice_config=voice_cfg
-        )
-        if voice_cfg
-        else None,
+        ) if voice_cfg else None,
         response_modalities=["AUDIO"],
         system_instruction=system_instr,
-
-
     )
 
     file_name = "gemini_voice_output.wav"
     async with voice_client.aio.live.connect(model=VOICE_MODEL, config=config) as session:
-
-        await session.send(user_prompt, end_of_turn=True)
+        await session.send(final_prompt, end_of_turn=True)
         turn = session.receive()
         with wave_file(file_name) as wav:
             async for _, response in async_enumerate(turn):
                 if response.data:
                     wav.writeframes(response.data)
+
     with open(file_name, "rb") as f:
         return f.read()
 
@@ -554,6 +712,7 @@ def generate_voice_response(prompt: str) -> bytes:
     return asyncio.run(do_voice_generation(prompt))
 
 
+# 2) Fix transcription in mobile (basic check / try-except fallback)
 def transcribe_with_whisper(audio_bytes: bytes) -> str:
     with open("temp_user_audio.wav", "wb") as tmp:
         tmp.write(audio_bytes)
@@ -561,12 +720,13 @@ def transcribe_with_whisper(audio_bytes: bytes) -> str:
         try:
             result = openai_client.audio.transcriptions.create(
                 model="whisper-1",
-                file=audio_file
+                file=audio_file,
+                
             )
             return result.text
         except Exception as e:
             st.warning(f"Whisper transcription failed: {e}")
-            return ""
+            return " "  # fallback empty
 
 
 float_init()
@@ -580,19 +740,44 @@ widget_container.float(
     "position: fixed; bottom: 15px;"
 )
 
-st.markdown("""
+# 6) Animate the container with the messages
+st.markdown(
+    """
+    <style>
+    .stChatMessage {
+      animation: fadeInUp 0.5s ease-in-out;
+    }
+    @keyframes fadeInUp {
+        0% {
+            opacity: 0;
+            transform: translate3d(0, 30%, 0);
+        }
+        100% {
+            opacity: 1;
+            transform: none;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+st.markdown(
+    """
 <style>
-
 .stCustomComponentV1{
     max-height: 200px;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True
+)
 
 # Process new input exactly once, then rerun.
 if user_input and user_input != st.session_state["last_user_input"]:
     st.session_state["last_user_input"] = user_input
     user_text_prompt = None
+
+    # 5) Ensure user response is always appended, even if assistant doesn't respond
 
     if "text" in user_input:
         text_val = user_input["text"].strip()
@@ -613,7 +798,7 @@ if user_input and user_input != st.session_state["last_user_input"]:
                 "parts": [{"text": transcript}]
             })
 
-    if user_text_prompt and conversation_mode == "Text + Images Only":
+    if user_text_prompt and conversation_mode == "Text + Media":
         try:
             with st.chat_message("user"):
                 st.markdown(user_text_prompt)
@@ -627,16 +812,20 @@ if user_input and user_input != st.session_state["last_user_input"]:
                     "role": "assistant",
                     "parts": [
                         {"text": assistant_text},
-
-
                     ]
                 })
             elif assistant_text and image is not None:
+                # If there's also an image to return
+                buffer = BytesIO()
+                image.save(buffer, format="JPEG")
+                image_data = buffer.getvalue()
+                image_b64 = base64.b64encode(image_data).decode("utf-8")
+
                 st.session_state["current_chat"].append({
                     "role": "assistant",
                     "parts": [
                         {"text": assistant_text},
-                        {"mime_type": "image/jpeg", "data": image}
+                        {"mime_type": "image/jpeg", "data": image_b64},
                     ]
                 })
         except Exception as e:
@@ -647,8 +836,10 @@ if user_input and user_input != st.session_state["last_user_input"]:
 
     elif user_text_prompt and conversation_mode == "Voice Conversation with Gemini":
         try:
-            parts_to_store = []  # <--- Add this line
-
+            with st.chat_message("user"):
+                st.markdown(user_text_prompt)
+            parts_to_store = []
+            # Voice generation with memory
             assistant_audio_bytes = generate_voice_response(
                 user_text_prompt) if user_text_prompt else None
             audio_b64 = base64.b64encode(
@@ -670,34 +861,69 @@ if user_input and user_input != st.session_state["last_user_input"]:
 
     st.rerun()
 
-uploaded_image = st.sidebar.file_uploader(
-    "Upload an image (PNG/JPG/JPEG)",
-    type=["png", "jpg", "jpeg"],
-    key="uploaded_image"
-)
-if uploaded_image and not st.session_state.get("image_processed", False):
 
-    image = Image.open(uploaded_image)
-    st.session_state['image_uploaded'] = image
-    st.sidebar.image(image, use_container_width=True)
-    if conversation_mode == "Text + Images Only":
+###################################################################
+# 4) We unify image/video/audio in the same uploader for text mode.
+###################################################################
+uploaded_media = st.sidebar.file_uploader(
+    "Upload image/video/audio (for text+image mode)",
+    type=["png", "jpg", "jpeg", "mp4", "mov", "avi", "wav", "mp3", "m4a"]
+)
+
+if uploaded_media and not st.session_state.get("image_processed", False):
+    if conversation_mode == "Text + Media":
         try:
-            if uploaded_image.type == "image/png":
-                image = image.convert("RGB")
-            buffer = BytesIO()
-            image.save(buffer, format="JPEG")
-            base64_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            st.session_state["current_chat"].append({
-                "role": "user",
-                "parts": [
-                    {"mime_type": "image/jpeg", "data": base64_data}
-                ]
-            })
+            file_type = uploaded_media.type
+            if file_type.startswith("image/"):
+                image = Image.open(uploaded_media)
+                st.session_state['image_uploaded'] = image
+                st.sidebar.image(image, use_container_width=True)
+
+                if file_type == "image/png":
+                    image = image.convert("RGB")
+                buffer = BytesIO()
+                image.save(buffer, format="JPEG")
+                base64_data = base64.b64encode(
+                    buffer.getvalue()).decode("utf-8")
+                st.session_state["current_chat"].append({
+                    "role": "user",
+                    "parts": [
+                        {"mime_type": "image/jpeg", "data": base64_data}
+                    ]
+                })
+
+            elif file_type.startswith("video/"):
+
+                # Convert the video to base64
+                video_bytes = uploaded_media.read()
+                video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+                st.sidebar.video(video_bytes)
+                st.session_state["current_chat"].append({
+                    "role": "user",
+                    "parts": [
+                        {"mime_type": file_type, "data": video_b64}
+                    ]
+                })
+
+                st.sidebar.info(f"Video uploaded as {file_type}")
+
+            elif file_type.startswith("audio/"):
+                # Convert the audio to base64
+                audio_bytes = uploaded_media.read()
+                audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                st.sidebar.audio(audio_bytes)
+                st.session_state["current_chat"].append({
+                    "role": "user",
+                    "parts": [
+                        {"mime_type": file_type, "data": audio_b64}
+                    ]
+                })
+
         except Exception as e:
-            st.sidebar.error(f"Could not encode image: {e}")
+            st.sidebar.error(f"Could not encode media: {e}")
     else:
         st.sidebar.info(
-            "You are in voice mode. Images can still be stored but not processed for voice."
+            "You are in voice mode. Media can be stored but will not be processed for voice generation."
         )
     st.session_state["image_processed"] = True
 
