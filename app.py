@@ -492,12 +492,65 @@ if st.session_state["logged_in"]:
     st.session_state["saved_chats"] = load_chats_from_firebase()
 # -----------------------------------------------------
 
-chat_name = st.sidebar.text_input(
+st.session_state['chat_name'] = st.sidebar.text_input(
     "Chat Name", placeholder="Enter a name to save this chat"
 )
 
 if st.sidebar.button("Save Current Chat"):
-    if chat_name:
+    if st.session_state['chat_name']:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.session_state["saved_chats"][st.session_state['chat_name']] = {
+            "timestamp": timestamp,
+            "messages": st.session_state["current_chat"],
+        }
+        save_chat_to_firebase(
+            st.session_state['chat_name'], st.session_state["current_chat"], timestamp)
+        st.sidebar.success(f"Chat '{st.session_state['chat_name']}' saved!")
+    else:
+        st.sidebar.warning("Please provide a name.")
+
+if st.sidebar.button("Clear Current Chat"):
+    st.session_state["current_chat"] = []
+    st.rerun()
+
+if not 'selected_chat' in st.session_state:
+    st.session_state['selected_chat'] = "Select"
+
+
+def update_chat():
+
+    if st.session_state['current_chat'] != []:
+        st.session_state['current_chat'] = []
+    selected_chat = st.session_state['selected_chat']
+    if selected_chat != "Select":
+        st.session_state["current_chat"] = st.session_state["saved_chats"][selected_chat]["messages"]
+        st.sidebar.success(f"Chat '{selected_chat}' loaded.")
+
+
+saved_chat_names = list(st.session_state["saved_chats"].keys(
+)) if st.session_state["logged_in"] else []
+
+st.session_state['selected_chat'] = st.sidebar.selectbox(
+    "Load a Saved Chat",
+    ["Select"] + saved_chat_names,
+)
+if st.session_state['selected_chat'] != "Select":
+    if st.sidebar.button("Load Chat"):
+        update_chat()
+    if st.sidebar.button("Delete Chat"):
+        # delete from firebase
+        chat_name = st.session_state['selected_chat']
+        user_id = st.session_state["user_id"]
+        user_chats_ref = db.reference(f'users/{user_id}/chats')
+        user_chats_ref.child(chat_name).delete()
+        # delete from session state
+        del st.session_state["saved_chats"][chat_name]
+        st.sidebar.success(f"Chat '{chat_name}' deleted.")
+        st.session_state['selected_chat'] = "Select"
+        st.session_state['current_chat'] = []
+        st.rerun()
+    if st.sidebar.button("Save chat"):
+        chat_name = st.session_state['selected_chat']
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.session_state["saved_chats"][chat_name] = {
             "timestamp": timestamp,
@@ -506,22 +559,9 @@ if st.sidebar.button("Save Current Chat"):
         save_chat_to_firebase(
             chat_name, st.session_state["current_chat"], timestamp)
         st.sidebar.success(f"Chat '{chat_name}' saved!")
-    else:
-        st.sidebar.warning("Please provide a name.")
 
-if st.sidebar.button("Clear Current Chat"):
-    st.session_state["current_chat"] = []
-    st.rerun()
 
-saved_chat_names = list(st.session_state["saved_chats"].keys(
-)) if st.session_state["logged_in"] else []
-selected_chat = st.sidebar.selectbox(
-    "Load a Saved Chat",
-    ["Select"] + saved_chat_names
-)
-if selected_chat != "Select":
-    st.session_state["current_chat"] = st.session_state["saved_chats"][selected_chat]["messages"]
-    st.sidebar.success(f"Chat '{selected_chat}' loaded.")
+#
 
 st.sidebar.header("PDF to Text Converter")
 uploaded_pdf = st.sidebar.file_uploader("Upload a PDF", type="pdf")
@@ -542,17 +582,12 @@ if uploaded_pdf is not None:
             f"{uploaded_pdf.name.replace('.pdf', '_output.txt')}",
             mime="text/plain"
         )
-        st.sidebar.button("Copy Extracted Text",
-                          on_click=copy_manual, args=(text,))
-        if text == clipboard.paste():
-            st.sidebar.success("Text copied to clipboard!")
-
-
-if selected_chat != "Select":
-    st.header(selected_chat)
+        st.sidebar.button("Add to context", on_click=st.session_state["current_chat"].append(
+            {"role": "user", "parts": [{"text": text}]}))
+if st.session_state['selected_chat'] != "Select":
+    st.header(st.session_state['selected_chat'])
 else:
     st.header("Chat Session")
-
 
 for idx, message in enumerate(st.session_state["current_chat"]):
 
@@ -861,7 +896,7 @@ if recoreder_audio is not None:
             elif assistant_text and image is not None:
                 # If there's also an image to return
                 buffer = BytesIO()
-                image.save(buffer, format="JPEG")
+                image.convert("RGB").save(buffer, format="JPEG")
                 image_data = buffer.getvalue()
                 image_b64 = base64.b64encode(image_data).decode("utf-8")
 
@@ -872,7 +907,7 @@ if recoreder_audio is not None:
                         {"mime_type": "image/jpeg", "data": image_b64},
                     ]
                 })
-           
+
             st.rerun()
 
         elif conversation_mode == "Voice Conversation with Gemini":
@@ -905,7 +940,7 @@ if recoreder_audio is not None:
                     "role": "assistant",
                     "parts": [{"text": f"Error generating assistant response: {e}"}]
                 })
-           
+
             st.rerun()
 
 
@@ -916,13 +951,13 @@ if uploaded_media and not st.session_state.get("file_processed", False):
             file_type = uploaded_media.type
             if file_type.startswith("image/"):
                 image = Image.open(uploaded_media)
-                st.session_state['image_uploaded'] = image
                 st.sidebar.image(image, use_container_width=True)
 
                 if file_type == "image/png":
                     image = image.convert("RGB")
                 buffer = BytesIO()
-                image.save(buffer, format="JPEG")
+                image.convert("RGB").save(buffer, format="JPEG")
+
                 base64_data = base64.b64encode(
                     buffer.getvalue()).decode("utf-8")
                 st.session_state["current_chat"].append({
@@ -968,8 +1003,11 @@ if uploaded_media and not st.session_state.get("file_processed", False):
             "You are in voice mode. Media can be stored but will not be processed for voice generation."
         )
     st.session_state["file_processed"] = True
+    # remove uploaded media to avoid reprocessing
 
-if st.session_state.get("file_processed", False):
+
+# If the file dont exist, reset the state
+if not uploaded_media:
     st.session_state["file_processed"] = False
 
 
@@ -993,8 +1031,6 @@ if user_input and user_input != st.session_state["last_user_input"]:
         try:
             with st.chat_message("user"):
                 st.markdown(user_text_prompt)
-                if st.session_state["image_uploaded"] is not None:
-                    st.image(st.session_state["image_uploaded"])
 
             assistant_text, image = generate_text_response(user_text_prompt)
 
@@ -1008,7 +1044,8 @@ if user_input and user_input != st.session_state["last_user_input"]:
             elif assistant_text and image is not None:
                 # If there's also an image to return
                 buffer = BytesIO()
-                image.save(buffer, format="JPEG")
+                image.convert("RGB").save(buffer, format="JPEG")
+
                 image_data = buffer.getvalue()
                 image_b64 = base64.b64encode(image_data).decode("utf-8")
 
@@ -1053,3 +1090,6 @@ if user_input and user_input != st.session_state["last_user_input"]:
             })
 
     st.rerun()
+
+
+st.sidebar.write(st.session_state["current_chat"])
