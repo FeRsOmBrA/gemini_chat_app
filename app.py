@@ -853,6 +853,9 @@ st.markdown(
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
+    .main .block-container {
+        padding-bottom: 50px;
+    }
     </style>
     """,
     unsafe_allow_html=True
