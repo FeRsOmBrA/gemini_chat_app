@@ -856,7 +856,7 @@ st.markdown(
     
     [data-testid="stChatInput"] {
         position: fixed;
-        bottom: 30px; /* Ajusta este valor según tus necesidades */
+        bottom: 55px ; /* Ajusta este valor según tus necesidades */
         z-index: 1000; /* Garantiza que el input esté por encima de otros elementos */
     }
 
