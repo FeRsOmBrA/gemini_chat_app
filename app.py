@@ -853,9 +853,14 @@ st.markdown(
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    .main .block-container {
-        padding-bottom: 50px;
+    
+    [data-testid="stChatInput"] {
+        position: fixed;
+        bottom: 30px; /* Ajusta este valor según tus necesidades */
+        z-index: 1000; /* Garantiza que el input esté por encima de otros elementos */
     }
+
+    
     </style>
     """,
     unsafe_allow_html=True
