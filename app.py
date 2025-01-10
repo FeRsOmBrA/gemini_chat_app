@@ -850,6 +850,9 @@ st.markdown(
             transform: none;
         }
     }
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
     </style>
     """,
     unsafe_allow_html=True
