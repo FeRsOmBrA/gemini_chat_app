@@ -37,7 +37,7 @@ from streamlit_float import float_init
 # 1) Implement memory in voice mode
 
 
-def build_voice_conversation_context(last_n=3) -> str:
+def build_voice_conversation_context(last_n=10) -> str:
     """
     Builds a simple text-based conversation string from the last n user 
     and assistant messages to provide context in voice mode.
@@ -758,7 +758,7 @@ async def do_voice_generation(user_prompt: str) -> bytes:
     to the Gemini voice model, and writes the streaming audio to a WAV file.
     """
     # 1) Implement memory in voice mode by building conversation context:
-    conversation_context = build_voice_conversation_context(3)
+    conversation_context = build_voice_conversation_context(10)
     final_prompt = conversation_context + "\nUser: " + user_prompt
 
     voice_cfg = None
@@ -865,14 +865,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-st.markdown(
-    """
-<style>
 
-</style>
-""",
-    unsafe_allow_html=True
-)
 
 ###################################################################
 # 4) We unify image/video/audio in the same uploader for text mode.
