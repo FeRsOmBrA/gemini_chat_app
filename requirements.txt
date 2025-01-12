@@ -8,4 +8,4 @@ openai
 streamlit_extras
 streamlit-chat-widget
 streamlit-float
-google-genai
+google-genai==0.3.0
