@@ -1096,4 +1096,3 @@ if user_input and user_input != st.session_state["last_user_input"]:
     st.rerun()
 
 
-st.sidebar.write(st.session_state["current_chat"])
