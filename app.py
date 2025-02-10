@@ -383,8 +383,8 @@ if "selected_model" not in st.session_state:
     if models:
         try:
             default_model = (
-                "gemini-2.0-flash-exp"
-                if "gemini-2.0-flash-exp" in models
+                "gemini-2.0-pro-exp"
+                if "gemini-2.0-pro-exp" in models
                 else ("gemini-1.5-pro-latest" if "gemini-1.5-pro-latest" in models else models[0])
             )
             st.session_state["selected_model"] = st.sidebar.selectbox(
@@ -1047,4 +1047,5 @@ if user_input and user_input != st.session_state["last_user_input"]:
                 "parts": [{"text": f"Error generating assistant response: {e}"}]
             })
     st.rerun()
+
 
